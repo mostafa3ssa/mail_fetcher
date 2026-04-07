@@ -10,4 +10,5 @@ public class EmailFetcherApplication {
 		SpringApplication.run(EmailFetcherApplication.class, args);
 	}
 
+
 }
