@@ -1,7 +1,5 @@
 package com.emailorch.email_fetcher.model;
 
-import ch.qos.logback.core.status.Status;
-
 import java.time.Instant;
 import java.util.UUID;
 
@@ -15,5 +13,7 @@ public record TransferRecord(UUID id,
                              String s3Key,
                              String err,
                              Instant createdAt,
-                             Instant doneAt) {
+                             Instant doneAt,
+                             String senderEmail,
+                             Instant emailSentAt) {
 }
