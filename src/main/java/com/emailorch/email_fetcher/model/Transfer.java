@@ -1,24 +1,11 @@
 package com.emailorch.email_fetcher.model;
 
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
-import org.springframework.data.annotation.Id;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Column;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.EnumType;
+import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
 @Table(name = "transfers")
-@Getter
-@Setter
-@NoArgsConstructor // Required for JPA
 public class Transfer {
 
     @Id
@@ -28,43 +15,121 @@ public class Transfer {
     @Column(nullable = false)
     private Long uid;
 
-    @Column(nullable = false)
+    @Column(name = "msg_id", nullable = false)
     private String msgId;
 
-    @Column(nullable = false)
+    @Column(name = "att_id", nullable = false, columnDefinition = "TEXT")
     private String attId;
 
     private String fname;
-
     private Long bytes;
 
-    @Enumerated(EnumType.STRING) // Maps Enum to VARCHAR in DB
-    private Status status = Status.PENDING;
+    @Column(name = "mime_type")
+    private String mimeType; // Added for S3 Content-Type headers
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Status status;
+
+    @Column(name = "s3_key", length = 1000)
     private String s3Key;
 
     @Column(columnDefinition = "TEXT")
     private String err;
 
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt = Instant.now();
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
 
-    private Instant doneAt; // Date of cloud upload
+    @Column(name = "done_at")
+    private Instant doneAt;
 
-    // New metadata fields from Gmail
+    @Column(name = "sender_email")
     private String senderEmail;
+
+    @Column(name = "email_sent_at")
     private Instant emailSentAt;
 
-    // Convenience constructor for creating new transfers
-    public Transfer(Long uid, String msgId, String attId, String fname, Long bytes, String senderEmail, Instant emailSentAt) {
+    // 1. Mandatory No-Args Constructor (JPA)
+    public Transfer() {}
+
+    // 2. Logic Constructor (For the Gmail Loop in TransferSvc)
+    // Use this to initialize the record immediately after finding an attachment
+    public Transfer(Long uid, String msgId, String attId, String fname,
+                    Long bytes, String mimeType, String senderEmail, Instant emailSentAt) {
         this.uid = uid;
         this.msgId = msgId;
         this.attId = attId;
         this.fname = fname;
         this.bytes = bytes;
+        this.mimeType = mimeType;
         this.senderEmail = senderEmail;
         this.emailSentAt = emailSentAt;
+
+        // Defaults
         this.status = Status.PENDING;
         this.createdAt = Instant.now();
     }
+
+    // 3. Full Constructor (For Record mapping/testing)
+    public Transfer(UUID id, Long uid, String msgId, String attId, String fname,
+                    Long bytes, String mimeType, Status status, String s3Key, String err,
+                    Instant createdAt, Instant doneAt, String senderEmail, Instant emailSentAt) {
+        this.id = id;
+        this.uid = uid;
+        this.msgId = msgId;
+        this.attId = attId;
+        this.fname = fname;
+        this.bytes = bytes;
+        this.mimeType = mimeType;
+        this.status = status;
+        this.s3Key = s3Key;
+        this.err = err;
+        this.createdAt = createdAt;
+        this.doneAt = doneAt;
+        this.senderEmail = senderEmail;
+        this.emailSentAt = emailSentAt;
+    }
+
+    // Getters and Setters
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public Long getUid() { return uid; }
+    public void setUid(Long uid) { this.uid = uid; }
+
+    public String getMsgId() { return msgId; }
+    public void setMsgId(String msgId) { this.msgId = msgId; }
+
+    public String getAttId() { return attId; }
+    public void setAttId(String attId) { this.attId = attId; }
+
+    public String getFname() { return fname; }
+    public void setFname(String fname) { this.fname = fname; }
+
+    public Long getBytes() { return bytes; }
+    public void setBytes(Long bytes) { this.bytes = bytes; }
+
+    public String getMimeType() { return mimeType; }
+    public void setMimeType(String mimeType) { this.mimeType = mimeType; }
+
+    public Status getStatus() { return status; }
+    public void setStatus(Status status) { this.status = status; }
+
+    public String getS3Key() { return s3Key; }
+    public void setS3Key(String s3Key) { this.s3Key = s3Key; }
+
+    public String getErr() { return err; }
+    public void setErr(String err) { this.err = err; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Instant getDoneAt() { return doneAt; }
+    public void setDoneAt(Instant doneAt) { this.doneAt = doneAt; }
+
+    public String getSenderEmail() { return senderEmail; }
+    public void setSenderEmail(String senderEmail) { this.senderEmail = senderEmail; }
+
+    public Instant getEmailSentAt() { return emailSentAt; }
+    public void setEmailSentAt(Instant emailSentAt) { this.emailSentAt = emailSentAt; }
 }
