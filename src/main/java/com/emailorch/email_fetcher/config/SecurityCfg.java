@@ -40,7 +40,7 @@ public class SecurityCfg {
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2
-                        .defaultSuccessUrl("/api/attachments", true)
+                        .defaultSuccessUrl("http://localhost:5173/", true)
                         .authorizedClientService(acs) // Saves the Google Token to your Supabase DB
                 )
                 .logout(logout -> logout.logoutSuccessUrl("/"));

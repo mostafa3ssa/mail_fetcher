@@ -6,7 +6,9 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "transfers")
+@Table(name = "transfers", uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"uid", "msg_id", "att_id"})
+})
 public class Transfer {
 
     @Id
@@ -19,9 +21,10 @@ public class Transfer {
     @Column(name = "msg_id")
     private String msgId;
 
-    @Column(name = "att_id")
+    @Column(name = "att_id", columnDefinition = "TEXT")
     private String attId;
 
+    @Column(columnDefinition = "TEXT")
     private String fname;
     private Long bytes;
 
@@ -51,7 +54,7 @@ public class Transfer {
     @Column(name = "done_at")
     private Instant doneAt;
 
-    @Column(name = "sender_email")
+    @Column(name = "sender_email", columnDefinition = "TEXT")
     private String senderEmail;
 
     @Column(name = "email_sent_at")
