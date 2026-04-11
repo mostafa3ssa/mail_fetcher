@@ -10,30 +10,41 @@ import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.SecurityFilterChain;
 
+import javax.sql.DataSource;
+
 @Configuration
 @EnableWebSecurity
 public class SecurityCfg {
 
-    // 1. Create the Supabase Token Service
-    @Bean
-    public OAuth2AuthorizedClientService acs(JdbcOperations jdbc, ClientRegistrationRepository crr) {
-        return new JdbcOAuth2AuthorizedClientService(jdbc, crr);
+    // Inject DataSource - Spring uses this to create the JdbcOperations bean internally
+    private final DataSource dataSource;
+
+    public SecurityCfg(DataSource dataSource) {
+        this.dataSource = dataSource;
     }
 
-    // 2. Wire it into the Filter Chain
+    // 1. Create the Supabase Token Service using JdbcTemplate
     @Bean
-    public SecurityFilterChain fc(HttpSecurity h, OAuth2AuthorizedClientService acs) throws Exception {
-        return h
-                .csrf(c -> c.disable())
-                .authorizeHttpRequests(a -> a
-                        .requestMatchers("/", "/error", "/oauth2/**", "/login/**").permitAll()
+    public OAuth2AuthorizedClientService authorizedClientService(ClientRegistrationRepository clientRegistrationRepository) {
+        return new JdbcOAuth2AuthorizedClientService(new org.springframework.jdbc.core.JdbcTemplate(dataSource), clientRegistrationRepository);
+    }
+
+    // 2. The SINGLE Filter Chain
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, OAuth2AuthorizedClientService acs) throws Exception {
+        http
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(auth -> auth
+                        // Permitting these allows Postman to work without the redirect loop
+                        .requestMatchers("/", "/error", "/oauth2/**", "/login/**", "/api/**").permitAll()
                         .anyRequest().authenticated()
                 )
-                .oauth2Login(o -> o
-                        .defaultSuccessUrl("/api/me", true)
-                        .authorizedClientService(acs) // <--- THIS SAVES THE TOKEN TO SUPABASE
+                .oauth2Login(oauth2 -> oauth2
+                        .defaultSuccessUrl("/api/attachments", true)
+                        .authorizedClientService(acs) // Saves the Google Token to your Supabase DB
                 )
-                .logout(l -> l.logoutSuccessUrl("/"))
-                .build();
+                .logout(logout -> logout.logoutSuccessUrl("/"));
+
+        return http.build();
     }
 }

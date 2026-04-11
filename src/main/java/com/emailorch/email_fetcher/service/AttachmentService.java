@@ -1,78 +1,43 @@
 package com.emailorch.email_fetcher.service;
-
+//TODO uncoment config oauth,email fetcher remove the excludes, userrepo , usercontroller
 import com.emailorch.email_fetcher.model.Transfer;
+import com.emailorch.email_fetcher.repository.TransferRepository;
+import com.google.api.services.gmail.model.ListMessagesResponse;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartHeader;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+
 @Service
 public class AttachmentService {
     GmailService gmailService;
-    AttachmentService(GmailService gmail){
+    TransferRepository transferRepository;
+    AttachmentService(GmailService gmail,TransferRepository transferRepository){
         this.gmailService =gmail;
+        this.transferRepository=transferRepository;
     }
-    public List<Transfer> fetchAttachment() throws IOException {
-        String credentiels=System.getenv("GMAIL_TOKEN");
-        var gmailclient =   gmailService.createClient(credentiels);
-        Long maxResults= 40L;
-        var response  =  gmailclient.users().messages().list("me").setQ("has:attachment").setMaxResults(maxResults).execute();
-        List<Transfer> attachmentsEmails = new ArrayList<>();
-        int count = 0;
-        for ( var msg : response.getMessages() ){
-            var message = gmailclient.users().messages()
-                    .get("me", msg.getId())
-                    .execute();
-
-            System.out.println(hasAttachment(message));
-
-            if(!hasAttachment(message)) continue;
-            Transfer t =  new Transfer();
 
 
-
-
-        }
-
-
-        System.out.println(attachmentsEmails);
-        //transferRepository.save(attachmentsEmails);
-
-        return attachmentsEmails;
-
-
-
-    }
-    private boolean hasAttachment(Message msg){
-        if(msg.getPayload()!=null){
-            var body = msg.getPayload().getBody();
-            System.out.println(body);
-            if(body==null){
-                return false;
-            }
-            if(body.getAttachmentId()==null) {
-                System.out.println(body.getAttachmentId());
-                return false;
-            }
-            return true;
-
-
-        }
-
-        return false;
-    }
     public List<Message> unitTest() throws IOException {
 
-        String credentiels=System.getenv("GMAIL_TOKEN");
+        String credentiels="";
         var gmailclient =   gmailService.createClient(credentiels);
+//        Transfer latest = (Transfer) transferRepository.findLatestTransfers();
+
+
         var response  =  gmailclient.users().messages().list("me").setQ("has:attachment").setMaxResults(1L).execute();
 
         System.out.println(response);
@@ -95,73 +60,108 @@ public class AttachmentService {
         return messages;
     }
     //TODO this is for test only
-    public List<Transfer> listTranfertest() throws IOException, ParseException {
-        List<Transfer> attachmentsEmails = new ArrayList<>();
-        String credentiels=System.getenv("GMAIL_TOKEN");
-        var gmailClient  = gmailService.createClient(credentiels);
-        Long results = 20L;
-        var response = gmailClient.users().messages().list("me").setQ("has:attachment").setMaxResults(results).execute();
-        for(Message msg :response.getMessages()) {
-            Message fullmessage = gmailClient.users().messages().get("me", msg.getId()).execute();
-
-            String from = null;
-            Instant instantDate = null;
-            for (MessagePartHeader header : fullmessage.getPayload().getHeaders()) {
-                if (header.getName().equalsIgnoreCase("from")) {
-                    from = header.getValue();
-                    break;
-                }
-                if (header.getName().equalsIgnoreCase("date")) {
-                    SimpleDateFormat format = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss Z");
-                    Date date = format.parse(header.getValue());
-                    instantDate = date.toInstant();
-
-                }
-
-
+    @Async
+    public CompletableFuture<List<Transfer>> listTranfertest() {
+        try {
+            List<Transfer> attachmentsEmails = new ArrayList<>();
+            // Hardcoded for testing - remember this token expires!
+            String credentiels = "";
+            String query = "has:attachment";
+            Instant last = transferRepository.findLatestTransfers();
+            DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy/MM/dd").withZone(ZoneId.systemDefault());
+            String date = dateTimeFormatter.format(last);
+            if(last==null){
+                query = "has:attachment";
+            }else {
+                query ="has:attachment after:"+date;
             }
-            String attachmentID = null;
-            String filename = null;
-            Long size = null;
-            String mimetype = null;
-            List<MessagePart> parts = fullmessage.getPayload().getParts();
-            if(parts!=null) {
-            for (MessagePart part : parts) {
+            var gmailClient = gmailService.createClient(credentiels);
+            String pageToken = null;
 
-                    filename = part.getFilename();
-                    if (filename != "" || !filename.isEmpty()) {
-                        attachmentID = part.getBody().getAttachmentId();
-//                        size = (long) part.getBody().size();
-                        size = Long.valueOf(part.getBody().getSize());
-                        mimetype = part.getMimeType();
+            // The do-while loop guarantees we fetch at least once, and keep going as long as there is a next page
+            do {
+                // 1. Build the request
+                var request = gmailClient.users().messages().list("me").setQ(query);
 
+                // 2. If we have a token from a previous loop, inject it to get the next page
+                if (pageToken != null) {
+                    request.setPageToken(pageToken);
+                }
+
+                // Execute the request for this specific page
+                var response = request.execute();
+
+                if (response.getMessages() != null) {
+                    for (Message msg : response.getMessages()) {
+                        // Fetch full details for each message in the current page
+                        Message fullmessage = gmailClient.users().messages().get("me", msg.getId()).execute();
+
+                        String from = null;
+                        Instant instantDate = null;
+
+                        // Extract Headers
+                        for (MessagePartHeader header : fullmessage.getPayload().getHeaders()) {
+                            if (header.getName().equalsIgnoreCase("from")) from = header.getValue();
+                            if (header.getName().equalsIgnoreCase("date")) {
+                                try {
+                                    String dateValue = header.getValue().replaceAll("\\s\\(.*\\)$", "");
+                                    SimpleDateFormat format = new SimpleDateFormat("EEE, d MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
+                                    instantDate = format.parse(dateValue).toInstant();
+                                } catch (Exception e) {
+                                    instantDate = Instant.ofEpochMilli(fullmessage.getInternalDate());
+                                }
+                            }
+                        }
+
+                        // Recursively dig out every attachment in the payload
+                        findAttachmentsRecursive(fullmessage.getPayload().getParts(), msg.getId(), from, instantDate, attachmentsEmails);
                     }
                 }
-            }
 
-//   Long uid,
-//    String msgId,
-//    String attId,
-//    String fname,
-//    Long bytes,
-//    String mimeType,
-//    String senderEmail,
-//    Instant emailSentAt
-            Transfer t = new Transfer(30L, msg.getId(), attachmentID, filename, size, mimetype, from, instantDate);
-            attachmentsEmails.add(t);
+                // 3. Update the pageToken. If Gmail has more pages, this gets a new string. If we are done, it becomes null.
+                pageToken = response.getNextPageToken();
 
+            } while (pageToken != null); // Loop repeats until pageToken is null
+
+            return CompletableFuture.completedFuture(attachmentsEmails);
+
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
         }
-
-
-
-
-        return  attachmentsEmails;
     }
 
-//    private List<Transfer> firstLogin(){
-//        return  ;
-//    }
-//    private List<Transfer> normlLoging(){
-//        return ;
-//    }
+    // Keep your existing recursive helper method right below it!
+    private void findAttachmentsRecursive(List<MessagePart> parts, String msgId, String from, Instant date, List<Transfer> list) {
+        if (parts == null) return;
+
+        for (MessagePart part : parts) {
+            if (part.getParts() != null) {
+                findAttachmentsRecursive(part.getParts(), msgId, from, date, list);
+            }
+
+            String filename = part.getFilename();
+            if (filename != null && !filename.isEmpty() && part.getBody().getAttachmentId() != null) {
+                Integer sizeInt = part.getBody().getSize();
+                Long sizeLong = (sizeInt != null) ? sizeInt.longValue() : 0L;
+
+                Transfer t = new Transfer(
+                        30L,
+                        msgId,
+                        part.getBody().getAttachmentId(),
+                        filename,
+                        sizeLong,
+                        part.getMimeType(),
+                        from,
+                        date
+                );
+                list.add(t);
+            }
+        }
+    }
+
+    // Recursive Helper Method
+
+//Done
+
+
 }

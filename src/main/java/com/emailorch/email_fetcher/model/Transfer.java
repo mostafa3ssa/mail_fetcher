@@ -2,6 +2,7 @@ package com.emailorch.email_fetcher.model;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
@@ -15,10 +16,10 @@ public class Transfer {
     @Column(nullable = false)
     private Long uid;
 
-    @Column(name = "msg_id", nullable = false)
+    @Column(name = "msg_id")
     private String msgId;
 
-    @Column(name = "att_id", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "att_id")
     private String attId;
 
     private String fname;
@@ -37,8 +38,15 @@ public class Transfer {
     @Column(columnDefinition = "TEXT")
     private String err;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    // In Transfer.java
+    @Column(name = "created_at")
     private Instant createdAt;
+
+    // Then your constructor just works:
+    public Transfer( Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
 
     @Column(name = "done_at")
     private Instant doneAt;
@@ -54,21 +62,7 @@ public class Transfer {
 
     // 2. Logic Constructor (For the Gmail Loop in TransferSvc)
     // Use this to initialize the record immediately after finding an attachment
-    public Transfer(Long uid, String msgId, String attId, String fname,
-                    Long bytes, String mimeType, String senderEmail, Instant emailSentAt) {
-        this.uid = uid;
-        this.msgId = msgId;
-        this.attId = attId;
-        this.fname = fname;
-        this.bytes = bytes;
-        this.mimeType = mimeType;
-        this.senderEmail = senderEmail;
-        this.emailSentAt = emailSentAt;
 
-        // Defaults
-        this.status = Status.PENDING;
-        this.createdAt = Instant.now();
-    }
 
     // 3. Full Constructor (For Record mapping/testing)
     public Transfer(UUID id, Long uid, String msgId, String attId, String fname,
@@ -89,6 +83,24 @@ public class Transfer {
         this.senderEmail = senderEmail;
         this.emailSentAt = emailSentAt;
     }
+    // USE THIS CONSTRUCTOR (Delete the old empty one)
+    public Transfer(Long uid, String msgId, String attId, String fname,
+                    Long bytes, String mimeType, String senderEmail, Instant emailSentAt) {
+        this.uid = uid;
+        this.msgId = msgId;
+        this.attId = attId;
+        this.fname = fname;
+        this.bytes = bytes;
+        this.mimeType = mimeType;
+        this.senderEmail = senderEmail;
+        this.emailSentAt = emailSentAt;
+
+        // Default values
+        this.status = Status.PENDING;
+        this.createdAt = Instant.now();
+    }
+
+
 
     // Getters and Setters
     public UUID getId() { return id; }
