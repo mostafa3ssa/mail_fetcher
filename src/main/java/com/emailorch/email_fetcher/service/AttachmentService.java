@@ -59,88 +59,81 @@ public class AttachmentService {
 
         return messages;
     }
-    //TODO this is for test only
-    @Async
-    public CompletableFuture<List<Transfer>> fetchAndSave(String accessToken, Long uid) {
-        try {
-            List<Transfer> attachmentsEmails = new ArrayList<>();
 
-            // 1. Create the client with the REAL Google Access Token! No more hardcoded strings.
+    public List<Transfer> fetchAndSave(String accessToken, Long uid) {
+        List<Transfer> attachmentsEmails = new ArrayList<>();
+
+        try {
+            System.out.println(">>> [1] Creating Gmail client for uid=" + uid);
             var gmailClient = gmailService.createClient(accessToken);
 
-            // 2. Build the query
-            // IMPORTANT PRO-TIP: Since you now have multiple users, you need to update
-            // your repository to find the latest transfer FOR THIS SPECIFIC UID.
-            // Change this to something like: transferRepository.findLatestTransferDateByUid(uid);
             Instant last = transferRepository.findLatestTransfersByUid(uid);
-
             String query = "has:attachment";
             if (last != null) {
-                // Subtracting 1 day (86400 seconds) just to be perfectly safe with the overlap
                 long safeEpoch = last.getEpochSecond() - 86400;
                 query = "has:attachment after:" + safeEpoch;
             }
+            System.out.println(">>> [2] Query: " + query);
 
             String pageToken = null;
 
-            // 3. The Gmail API Pagination Loop
             do {
-                // Build the request
                 var request = gmailClient.users().messages().list("me").setQ(query);
+                if (pageToken != null) request.setPageToken(pageToken);
 
-                // Inject token for the next page if it exists
-                if (pageToken != null) {
-                    request.setPageToken(pageToken);
-                }
-
-                // Execute the request
                 var response = request.execute();
+
+                System.out.println(">>> [3] Messages in response: " +
+                        (response.getMessages() != null ? response.getMessages().size() : "NULL"));
 
                 if (response.getMessages() != null) {
                     for (Message msg : response.getMessages()) {
 
-                        // Fetch full details for each message
-                        Message fullmessage = gmailClient.users().messages().get("me", msg.getId()).execute();
+                        System.out.println(">>> [4] Fetching full message: " + msg.getId());
+                        Message fullmessage = gmailClient.users().messages()
+                                .get("me", msg.getId()).execute();
 
                         String from = null;
                         Instant instantDate = null;
 
-                        // Extract Headers (Sender and Date)
                         for (MessagePartHeader header : fullmessage.getPayload().getHeaders()) {
                             if (header.getName().equalsIgnoreCase("from")) from = header.getValue();
                             if (header.getName().equalsIgnoreCase("date")) {
                                 try {
                                     String dateValue = header.getValue().replaceAll("\\s\\(.*\\)$", "");
-                                    SimpleDateFormat format = new SimpleDateFormat("EEE, d MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
+                                    SimpleDateFormat format = new SimpleDateFormat(
+                                            "EEE, d MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
                                     instantDate = format.parse(dateValue).toInstant();
                                 } catch (Exception e) {
-                                    // Fallback to Google's internal timestamp if the header fails to parse
                                     instantDate = Instant.ofEpochMilli(fullmessage.getInternalDate());
                                 }
                             }
                         }
 
-                        // 4. Dig out the attachments and PASS THE UID DOWN
+                        int before = attachmentsEmails.size();
                         findAttachmentsRecursive(
                                 fullmessage.getPayload().getParts(),
-                                msg.getId(),
-                                from,
-                                instantDate,
-                                attachmentsEmails,
-                                uid // <--- Injected here!
+                                msg.getId(), from, instantDate,
+                                attachmentsEmails, uid
                         );
+                        int after = attachmentsEmails.size();
+                        System.out.println(">>> [5] Message " + msg.getId() +
+                                " → found " + (after - before) + " attachments");
                     }
                 }
 
-                // Update the pageToken. Null means we reached the end of the inbox.
                 pageToken = response.getNextPageToken();
+                System.out.println(">>> [6] Next page token: " + pageToken);
 
             } while (pageToken != null);
 
-            return CompletableFuture.completedFuture(attachmentsEmails);
+            System.out.println(">>> [7] TOTAL attachments found: " + attachmentsEmails.size());
+            return attachmentsEmails;
 
         } catch (Exception e) {
-            return CompletableFuture.failedFuture(e);
+            System.err.println(">>> [ERROR] Gmail fetch failed: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Gmail sync failed", e);
         }
     }
 

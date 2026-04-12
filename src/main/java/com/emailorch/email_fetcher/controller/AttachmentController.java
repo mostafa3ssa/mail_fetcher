@@ -63,37 +63,58 @@ public class AttachmentController {
 
         // 4. Implement the "Sync Logic" from your documentation
         long dbCount = transferRepository.countByUid(uid);
+        boolean needsSync = dbCount == 0 || sync;
 
-        if (dbCount == 0 || sync) {
+        if(needsSync) {
+            // Double-check: only sync if still 0 (another request might have just finished)
+            synchronized (this) {
+                dbCount = transferRepository.countByUid(uid);
+                if (dbCount > 0 && !sync) {
+                    needsSync = false;
+                }
+            }
+        }
+
+        if (needsSync) {
             OAuth2AuthorizedClient client = clientService.loadAuthorizedClient("google", u.getName());
             String accessToken = client.getAccessToken().getTokenValue();
 
-            // 1. Fetch the recent emails from Google
-            List<Transfer> fetchedTransfers = attachmentService.fetchAndSave(accessToken, uid).join();
+            List<Transfer> fetchedTransfers = attachmentService.fetchAndSave(accessToken, uid);
+            System.out.println(">>> FETCHED: " + fetchedTransfers.size());
 
-            // 2. Use msgId + fname as the unbreakable unique key
-            java.util.Map<String, Transfer> uniqueBatch = new java.util.HashMap<>();
+            // Dedup in memory: msgId + fname is the ONLY reliable unique key
+            Map<String, Transfer> uniqueBatch = new java.util.HashMap<>();
             for (Transfer t : fetchedTransfers) {
-                // E.g., "18b9c1a2b3_report.pdf"
-                String uniqueKey = t.getMsgId() + "_" + t.getFname();
-                uniqueBatch.put(uniqueKey, t);
+                // E.g., "18b9c1a2b3:report.pdf"
+                String key = t.getMsgId() + ":" + t.getFname();
+                uniqueBatch.put(key, t);
             }
 
-            // 3. Now check the Database using the stable filename
-            List<Transfer> finalTransfersToSave = new java.util.ArrayList<>();
+            // Check DB: skip rows that already exist
+            List<Transfer> toSave = new java.util.ArrayList<>();
             for (Transfer t : uniqueBatch.values()) {
                 if (!transferRepository.existsByUidAndMsgIdAndFname(uid, t.getMsgId(), t.getFname())) {
-                    finalTransfersToSave.add(t);
+                    toSave.add(t);
                 }
             }
 
-            if (!finalTransfersToSave.isEmpty()) {
+            System.out.println(">>> NEW attachments to save: " + toSave.size());
+
+            if (!toSave.isEmpty()) {
                 try {
-                    transferRepository.saveAll(finalTransfersToSave);
+                    transferRepository.saveAll(toSave);
+                    System.out.println(">>> SAVED: " + toSave.size());
                 } catch (org.springframework.dao.DataIntegrityViolationException e) {
-                    // If a race condition happens and another thread saved it a millisecond ago,
-                    // PostgreSQL will block it. We just catch the error and do nothing!
-                    System.out.println("Race condition averted: PostgreSQL blocked a duplicate.");
+                    // Genuine race condition — another request saved the same rows
+                    System.out.println(">>> Race condition: " + e.getMessage());
+                    // Save one by one to rescue the non-duplicate rows
+                    for (Transfer t : toSave) {
+                        try {
+                            transferRepository.save(t);
+                        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                            // This specific row was the duplicate — skip it
+                        }
+                    }
                 }
             }
         }

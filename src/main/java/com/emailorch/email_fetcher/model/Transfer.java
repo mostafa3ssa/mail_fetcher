@@ -7,8 +7,9 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "transfers", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"uid", "msg_id", "att_id"})
-})
+        // CHANGED BACK TO FNAME
+        @UniqueConstraint(columnNames = {"uid", "msg_id", "fname"})
+}) // ...
 public class Transfer {
 
     @Id
@@ -32,8 +33,7 @@ public class Transfer {
     private String mimeType; // Added for S3 Content-Type headers
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private Status status;
+    private Status status = null;
 
     @Column(name = "s3_key", length = 1000)
     private String s3Key;
