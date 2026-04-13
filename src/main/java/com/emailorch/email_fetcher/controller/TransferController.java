@@ -2,6 +2,7 @@ package com.emailorch.email_fetcher.controller;
 
 import com.emailorch.email_fetcher.model.Status;
 import com.emailorch.email_fetcher.model.Transfer;
+import com.emailorch.email_fetcher.provider.CloudProvider;
 import com.emailorch.email_fetcher.repository.TransferRepository;
 import com.emailorch.email_fetcher.repository.UserRepository;
 import com.emailorch.email_fetcher.service.TransferService;
@@ -23,11 +24,14 @@ public class TransferController {
     private final TransferService svc;
     private final TransferRepository repo;
     private final UserRepository urepo;
+    private final CloudProvider cp;       // ← NEW
 
-    public TransferController(TransferService svc, TransferRepository repo, UserRepository urepo) {
+    public TransferController(TransferService svc, TransferRepository repo,
+                              UserRepository urepo, CloudProvider cp) {
         this.svc = svc;
         this.repo = repo;
         this.urepo = urepo;
+        this.cp = cp;                     // ← NEW
     }
 
     // ── POST /api/transfers ─────────────────────────────────────
@@ -37,21 +41,17 @@ public class TransferController {
             @RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient c,
             @AuthenticationPrincipal OAuth2User u) {
 
-        // 1. Resolve user
         Long uid = resolveUid(u);
 
-        // [CHANGE 1]: Validate 'fname' instead of 'attId'
         if (req.msgId == null || req.fname == null) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "validation_error",
                             "message", "msgId and fname are required"));
         }
 
-        // [CHANGE 2]: Call the new Repository method using 'fname'
         var opt = repo.findByUidAndMsgIdAndFname(uid, req.msgId, req.fname);
 
         if (opt.isEmpty()) {
-            // [CHANGE 3]: Update the error message so your frontend devs aren't confused
             return ResponseEntity.status(404)
                     .body(Map.of("error", "not_found",
                             "message", "No synced attachment found for this msgId and fname"));
@@ -59,10 +59,8 @@ public class TransferController {
 
         Transfer t = opt.get();
 
-        // 4. Validate status
         if (t.getStatus() != null) {
             if (t.getStatus() == Status.FAILED) {
-                // Retry allowed — reset error fields
                 t.setErr(null);
                 t.setS3Key(null);
                 t.setDoneAt(null);
@@ -70,21 +68,17 @@ public class TransferController {
                 return ResponseEntity.status(409)
                         .body(Map.of("error", "transfer_already_completed"));
             } else {
-                // PENDING or STREAMING
                 return ResponseEntity.status(409)
                         .body(Map.of("error", "transfer_already_in_progress"));
             }
         }
 
-        // 5. Set PENDING and save
         t.setStatus(Status.PENDING);
         repo.save(t);
 
-        // 6. Dispatch async — returns instantly
         String tok = c.getAccessToken().getTokenValue();
         svc.exec(t, tok);
 
-        // 7. Return 202
         return ResponseEntity.accepted()
                 .body(Map.of("id", t.getId(), "status", "PENDING"));
     }
@@ -97,6 +91,51 @@ public class TransferController {
                 .orElse(ResponseEntity.status(404)
                         .body(Map.of("error", "not_found",
                                 "message", "Transfer not found")));
+    }
+
+    // ── GET /api/transfers/{id}/download ────────────────────────  ← NEW
+    @GetMapping("/{id}/download")
+    ResponseEntity<?> download(@PathVariable UUID id,
+                               @AuthenticationPrincipal OAuth2User u) {
+
+        // 1. Auth check
+        if (u == null) {
+            return ResponseEntity.status(401)
+                    .body(Map.of("error", "unauthenticated"));
+        }
+
+        // 2. Find the transfer
+        var opt = repo.findById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.status(404)
+                    .body(Map.of("error", "not_found",
+                            "message", "Transfer not found"));
+        }
+
+        Transfer t = opt.get();
+
+        // 3. Verify ownership
+        Long uid = resolveUid(u);
+        if (!t.getUid().equals(uid)) {
+            return ResponseEntity.status(403)
+                    .body(Map.of("error", "forbidden"));
+        }
+
+        // 4. Must be DONE with a valid s3Key
+        if (t.getStatus() != Status.DONE || t.getS3Key() == null) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "not_uploaded",
+                            "message", "File has not been uploaded yet"));
+        }
+
+        // 5. Generate presigned URL (valid 15 min)
+        String url = cp.presign(t.getS3Key());
+
+        return ResponseEntity.ok(Map.of(
+                "url", url,
+                "fname", t.getFname(),
+                "expiresIn", 900
+        ));
     }
 
     // ── Helpers ─────────────────────────────────────────────────

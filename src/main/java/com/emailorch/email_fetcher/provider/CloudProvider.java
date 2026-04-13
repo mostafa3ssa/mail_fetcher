@@ -9,4 +9,5 @@ public interface CloudProvider {
      * Returns the final storage key.
      */
     String upload(String key, InputStream in, long len, String mime);
+    String presign(String key);
 }

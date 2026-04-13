@@ -7,6 +7,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
 
@@ -24,15 +25,24 @@ public class R2Config {
 
     @Bean
     S3Client s3() {
-        // R2 is S3-compatible — same SDK, different endpoint
         var creds = StaticCredentialsProvider.create(
                 AwsBasicCredentials.create(ak, sk)
         );
         return S3Client.builder()
-                .endpointOverride(URI.create(
-                        "https://" + acct + ".r2.cloudflarestorage.com"
-                ))
-                .region(Region.of("auto"))       // R2 uses "auto"
+                .endpointOverride(URI.create("https://" + acct + ".r2.cloudflarestorage.com"))
+                .region(Region.of("auto"))
+                .credentialsProvider(creds)
+                .build();
+    }
+
+    @Bean
+    S3Presigner presigner() {
+        var creds = StaticCredentialsProvider.create(
+                AwsBasicCredentials.create(ak, sk)
+        );
+        return S3Presigner.builder()
+                .endpointOverride(URI.create("https://" + acct + ".r2.cloudflarestorage.com"))
+                .region(Region.of("auto"))
                 .credentialsProvider(creds)
                 .build();
     }
