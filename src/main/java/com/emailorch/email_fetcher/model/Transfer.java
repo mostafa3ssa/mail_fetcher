@@ -7,9 +7,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "transfers", uniqueConstraints = {
-        // CHANGED BACK TO FNAME
         @UniqueConstraint(columnNames = {"uid", "msg_id", "fname"})
-}) // ...
+})
 public class Transfer {
 
     @Id
@@ -30,10 +29,10 @@ public class Transfer {
     private Long bytes;
 
     @Column(name = "mime_type")
-    private String mimeType; // Added for S3 Content-Type headers
+    private String mimeType;
 
     @Enumerated(EnumType.STRING)
-    private Status status = null;
+    private Status status;           // null = synced, never uploaded
 
     @Column(name = "s3_key", length = 1000)
     private String s3Key;
@@ -41,15 +40,8 @@ public class Transfer {
     @Column(columnDefinition = "TEXT")
     private String err;
 
-    // In Transfer.java
     @Column(name = "created_at")
     private Instant createdAt;
-
-    // Then your constructor just works:
-    public Transfer( Instant createdAt) {
-        this.createdAt = createdAt;
-    }
-
 
     @Column(name = "done_at")
     private Instant doneAt;
@@ -60,33 +52,10 @@ public class Transfer {
     @Column(name = "email_sent_at")
     private Instant emailSentAt;
 
-    // 1. Mandatory No-Args Constructor (JPA)
+    // 1. JPA no-args (required)
     public Transfer() {}
 
-    // 2. Logic Constructor (For the Gmail Loop in TransferSvc)
-    // Use this to initialize the record immediately after finding an attachment
-
-
-    // 3. Full Constructor (For Record mapping/testing)
-    public Transfer(UUID id, Long uid, String msgId, String attId, String fname,
-                    Long bytes, String mimeType, Status status, String s3Key, String err,
-                    Instant createdAt, Instant doneAt, String senderEmail, Instant emailSentAt) {
-        this.id = id;
-        this.uid = uid;
-        this.msgId = msgId;
-        this.attId = attId;
-        this.fname = fname;
-        this.bytes = bytes;
-        this.mimeType = mimeType;
-        this.status = status;
-        this.s3Key = s3Key;
-        this.err = err;
-        this.createdAt = createdAt;
-        this.doneAt = doneAt;
-        this.senderEmail = senderEmail;
-        this.emailSentAt = emailSentAt;
-    }
-    // USE THIS CONSTRUCTOR (Delete the old empty one)
+    // 2. Sync constructor (Gmail discovery — status is NULL)
     public Transfer(Long uid, String msgId, String attId, String fname,
                     Long bytes, String mimeType, String senderEmail, Instant emailSentAt) {
         this.uid = uid;
@@ -97,15 +66,11 @@ public class Transfer {
         this.mimeType = mimeType;
         this.senderEmail = senderEmail;
         this.emailSentAt = emailSentAt;
-
-        // Default values
-        this.status = Status.PENDING;
+        this.status = null;            // ← DISCOVERED, NOT UPLOADED
         this.createdAt = Instant.now();
     }
 
-
-
-    // Getters and Setters
+    // Getters and Setters (unchanged)
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
 

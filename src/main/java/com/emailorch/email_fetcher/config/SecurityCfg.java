@@ -16,32 +16,35 @@ import javax.sql.DataSource;
 @EnableWebSecurity
 public class SecurityCfg {
 
-    // Inject DataSource - Spring uses this to create the JdbcOperations bean internally
     private final DataSource dataSource;
+    private final OAuth2LoginSuccessHandler successHandler;  // ← inject
 
-    public SecurityCfg(DataSource dataSource) {
+    public SecurityCfg(DataSource dataSource, OAuth2LoginSuccessHandler successHandler) {
         this.dataSource = dataSource;
+        this.successHandler = successHandler;
     }
 
-    // 1. Create the Supabase Token Service using JdbcTemplate
     @Bean
-    public OAuth2AuthorizedClientService authorizedClientService(ClientRegistrationRepository clientRegistrationRepository) {
-        return new JdbcOAuth2AuthorizedClientService(new org.springframework.jdbc.core.JdbcTemplate(dataSource), clientRegistrationRepository);
+    public OAuth2AuthorizedClientService authorizedClientService(
+            ClientRegistrationRepository clientRegistrationRepository) {
+        return new JdbcOAuth2AuthorizedClientService(
+                new org.springframework.jdbc.core.JdbcTemplate(dataSource),
+                clientRegistrationRepository
+        );
     }
 
-    // 2. The SINGLE Filter Chain
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, OAuth2AuthorizedClientService acs) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                   OAuth2AuthorizedClientService acs) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        // Permitting these allows Postman to work without the redirect loop
                         .requestMatchers("/", "/error", "/oauth2/**", "/login/**", "/api/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2
-                        .defaultSuccessUrl("http://localhost:5173/", true)
-                        .authorizedClientService(acs) // Saves the Google Token to your Supabase DB
+                        .successHandler(successHandler)      // ← replaces defaultSuccessUrl
+                        .authorizedClientService(acs)
                 )
                 .logout(logout -> logout.logoutSuccessUrl("/"));
 

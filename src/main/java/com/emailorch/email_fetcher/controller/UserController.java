@@ -27,32 +27,21 @@ public class UserController {
 
     @GetMapping("")
     public ResponseEntity<?> me(@AuthenticationPrincipal OAuth2User u) {
-        // If there's no session, return a 401 Unauthorized
         if (u == null) {
             return ResponseEntity.status(401).body(Map.of("error", "unauthenticated"));
         }
 
         String email = u.getAttribute("email");
-        String name = u.getAttribute("name");
-        String pic = u.getAttribute("picture");
 
-        Optional<User> existingUser = userRepo.findByEmail(email);
-        if (existingUser.isEmpty()) {
-            User newUser = new User();
-            newUser.setEmail(email);
-            newUser.setName(name);
-            newUser.setPic(pic);
-            userRepo.save(newUser); // Hits the database!
-        }
+        // User is GUARANTEED to exist — created during login
+        User dbUser = userRepo.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found: " + email));
 
-
-        // Return the Google profile data as JSON
         return ResponseEntity.ok(Map.of(
-                "email", email,
-                "name", name,
-                "pic", pic
+                "id", dbUser.getId(),
+                "email", dbUser.getEmail(),
+                "name", dbUser.getName(),
+                "pic", dbUser.getPic()
         ));
     }
-
-
 }
