@@ -23,8 +23,8 @@ import java.util.concurrent.CompletableFuture;
 
 @Service
 public class AttachmentService {
-    GmailService gmailService;
-    TransferRepository transferRepository;
+    private final GmailService gmailService;
+    private final TransferRepository transferRepository;
     AttachmentService(GmailService gmail,TransferRepository transferRepository){
         this.gmailService =gmail;
         this.transferRepository=transferRepository;
@@ -151,7 +151,9 @@ public class AttachmentService {
             if (filename != null && !filename.isEmpty() && part.getBody().getAttachmentId() != null) {
                 Integer sizeInt = part.getBody().getSize();
                 Long sizeLong = (sizeInt != null) ? sizeInt.longValue() : 0L;
-
+               if(sizeLong < 20480 && part.getMimeType()!=null && part.getMimeType().startsWith("image/")){
+                   continue;
+               }
                 // BOOM. Real UID injected directly into the row.
                 Transfer t = new Transfer(
                         uid,

@@ -5,6 +5,7 @@ import com.emailorch.email_fetcher.model.User;
 import com.emailorch.email_fetcher.repository.TransferRepository;
 import com.emailorch.email_fetcher.repository.UserRepository;
 import com.emailorch.email_fetcher.service.AttachmentService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -28,7 +29,7 @@ public class AttachmentController {
     private final TransferRepository transferRepository;
     private final UserRepository userRepository;
     private final OAuth2AuthorizedClientService clientService;
-
+    @Autowired
     public AttachmentController(AttachmentService attachmentService,
                                 TransferRepository transferRepository,
                                 UserRepository userRepository,
@@ -38,7 +39,10 @@ public class AttachmentController {
         this.userRepository = userRepository;
         this.clientService = clientService;
     }
-
+    /// REQuest Parma
+    /// path variable
+    /// consumes json
+    ///
     @GetMapping
     public ResponseEntity<?> listAttachments(
             @AuthenticationPrincipal OAuth2User u,
@@ -67,6 +71,7 @@ public class AttachmentController {
 
         if(needsSync) {
             // Double-check: only sync if still 0 (another request might have just finished)
+            //stops sync mess if the user presses 2 times simeltinously Race Condition Protection to prevent duplication
             synchronized (this) {
                 dbCount = transferRepository.countByUid(uid);
                 if (dbCount > 0 && !sync) {
@@ -90,7 +95,7 @@ public class AttachmentController {
                 uniqueBatch.put(key, t);
             }
 
-            // Check DB: skip rows that already exist
+            // Check DB: skip rows that already exist ahhh this prevent duplicates
             List<Transfer> toSave = new java.util.ArrayList<>();
             for (Transfer t : uniqueBatch.values()) {
                 if (!transferRepository.existsByUidAndMsgIdAndFname(uid, t.getMsgId(), t.getFname())) {

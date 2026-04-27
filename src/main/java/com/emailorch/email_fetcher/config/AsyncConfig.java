@@ -6,7 +6,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
-
+//this is telling spring whenever a function is markedwith @Async don't run it in main thread give it to a sperate thread
 @Configuration
 @EnableAsync
 public class AsyncConfig {
