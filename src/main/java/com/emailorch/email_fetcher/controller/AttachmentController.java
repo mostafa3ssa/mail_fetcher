@@ -10,9 +10,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
@@ -48,8 +50,9 @@ public class AttachmentController {
             @AuthenticationPrincipal OAuth2User u,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "false") boolean sync
-    ) {
+            @RequestParam(defaultValue = "false") boolean sync,
+            Authentication auth
+    ) throws Exception {
         // 1. Security Check
         if (u == null) {
             return ResponseEntity.status(401).body(Map.of("error", "unauthenticated"));
@@ -60,84 +63,10 @@ public class AttachmentController {
         User dbUser = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         Long uid = dbUser.getId();
-
-        // 3. Enforce the Frontend's Size Limit (Max 50)
-        int safeSize = Math.min(size, 50);
-        Pageable pageable = PageRequest.of(page, safeSize);
-
-        // 4. Implement the "Sync Logic" from your documentation
-        long dbCount = transferRepository.countByUid(uid);
-        boolean needsSync = dbCount == 0 || sync;
-
-        if(needsSync) {
-            // Double-check: only sync if still 0 (another request might have just finished)
-            //stops sync mess if the user presses 2 times simeltinously Race Condition Protection to prevent duplication
-            synchronized (this) {
-                dbCount = transferRepository.countByUid(uid);
-                if (dbCount > 0 && !sync) {
-                    needsSync = false;
-                }
-            }
-        }
-
-        if (needsSync) {
-            OAuth2AuthorizedClient client = clientService.loadAuthorizedClient("google", u.getName());
-            String accessToken = client.getAccessToken().getTokenValue();
-
-            List<Transfer> fetchedTransfers = attachmentService.fetchAndSave(accessToken, uid);
-            System.out.println(">>> FETCHED: " + fetchedTransfers.size());
-
-            // Dedup in memory: msgId + fname is the ONLY reliable unique key
-            Map<String, Transfer> uniqueBatch = new java.util.HashMap<>();
-            for (Transfer t : fetchedTransfers) {
-                // E.g., "18b9c1a2b3:report.pdf"
-                String key = t.getMsgId() + ":" + t.getFname();
-                uniqueBatch.put(key, t);
-            }
-
-            // Check DB: skip rows that already exist ahhh this prevent duplicates
-            List<Transfer> toSave = new java.util.ArrayList<>();
-            for (Transfer t : uniqueBatch.values()) {
-                if (!transferRepository.existsByUidAndMsgIdAndFname(uid, t.getMsgId(), t.getFname())) {
-                    toSave.add(t);
-                }
-            }
-
-            System.out.println(">>> NEW attachments to save: " + toSave.size());
-
-            if (!toSave.isEmpty()) {
-                try {
-                    transferRepository.saveAll(toSave);
-                    System.out.println(">>> SAVED: " + toSave.size());
-                } catch (org.springframework.dao.DataIntegrityViolationException e) {
-                    // Genuine race condition — another request saved the same rows
-                    System.out.println(">>> Race condition: " + e.getMessage());
-                    // Save one by one to rescue the non-duplicate rows
-                    for (Transfer t : toSave) {
-                        try {
-                            transferRepository.save(t);
-                        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
-                            // This specific row was the duplicate — skip it
-                        }
-                    }
-                }
-            }
-        }
-
-        // 5. Query the Database for the requested page
-        Page<Transfer> transferPage = transferRepository.findByUidOrderByEmailSentAtDesc(uid, pageable);
-
-        // 6. Map to EXACTLY match the Frontend JSON Documentation
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("content", transferPage.getContent());
-        response.put("page", transferPage.getNumber());
-        response.put("size", transferPage.getSize());
-        response.put("totalElements", transferPage.getTotalElements());
-        response.put("totalPages", transferPage.getTotalPages());
-        response.put("first", transferPage.isFirst());
-        response.put("last", transferPage.isLast());
-        response.put("empty", transferPage.isEmpty());
-
+        OAuth2AuthenticationToken token = (OAuth2AuthenticationToken) auth;
+        String provider = token.getAuthorizedClientRegistrationId();
+        attachmentService.syncall(uid,u.getName(),sync,provider);
+        Map<String, Object> response = attachmentService.response(uid,page,size);
         return ResponseEntity.ok(response);
     }
 }

@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
@@ -25,10 +26,18 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     public void onAuthenticationSuccess(HttpServletRequest req,
                                         HttpServletResponse res,
                                         Authentication auth) throws IOException, ServletException {
+        OAuth2AuthenticationToken token = (OAuth2AuthenticationToken) auth;
+        String provider =  token.getAuthorizedClientRegistrationId();
 
         OAuth2User u = (OAuth2User) auth.getPrincipal();
 
         String email = u.getAttribute("email");
+        if(email==null && provider.equalsIgnoreCase("microsoft")){
+            email= u.getAttribute("userPrincipalName");
+        }
+        if(email==null && provider.equalsIgnoreCase("microsoft")){
+            email= u.getAttribute("mail");
+        }
         String name = u.getAttribute("name");
         String pic = u.getAttribute("picture");
 

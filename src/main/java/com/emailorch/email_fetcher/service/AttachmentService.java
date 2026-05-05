@@ -1,33 +1,50 @@
 package com.emailorch.email_fetcher.service;
 //TODO uncoment config oauth,email fetcher remove the excludes, userrepo , usercontroller
+//import com.azure.core.http.rest.Page;
 import com.emailorch.email_fetcher.model.Transfer;
 import com.emailorch.email_fetcher.repository.TransferRepository;
-import com.google.api.services.gmail.model.ListMessagesResponse;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartHeader;
+import com.microsoft.graph.models.Attachment;
+import com.microsoft.graph.models.AttachmentCollectionResponse;
+import com.microsoft.graph.models.FileAttachment;
+import com.microsoft.graph.models.MessageCollectionResponse;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.security.oauth2.client.InMemoryOAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.stereotype.Service;
-
 import java.io.IOException;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.CompletableFuture;
+import java.util.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.stereotype.Service;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @Service
 public class AttachmentService {
     private final GmailService gmailService;
-    private final TransferRepository transferRepository;
-    AttachmentService(GmailService gmail,TransferRepository transferRepository){
+    private final TransferRepository transferRepository ;
+    private final OutlookService outlookService;
+    private final OAuth2AuthorizedClientService clientService;
+    private final EmailFetchingAsyncService emailFetchingAsyncService;
+
+    AttachmentService(GmailService gmail,TransferRepository transferRepository,OutlookService outlookService,OAuth2AuthorizedClientService clientService,EmailFetchingAsyncService emailFetchingAsyncService) throws Exception {
         this.gmailService =gmail;
+        this.outlookService=outlookService;
+        this.clientService=clientService;
         this.transferRepository=transferRepository;
+        this.emailFetchingAsyncService=emailFetchingAsyncService;
     }
 
 
@@ -44,8 +61,8 @@ public class AttachmentService {
 
 //       System.out.print(hasAttachment(msg));
 //       Transfer t = new Transfer();
-//           if(hasAttachment(msg)) attachmentsEmails.add(msg) ;
-//       return attachmentsEmails;
+//           if(hasAttachment(msg)) transfers.add(msg) ;
+//       return transfers;
         List<Message> messages = new ArrayList<>();
         for(Message msg :response.getMessages()){
             Message fullmessage  = gmailclient.users().messages().get("me", msg.getId())
@@ -59,120 +76,72 @@ public class AttachmentService {
 
         return messages;
     }
+/// provider
+///
 
-    public List<Transfer> fetchAndSave(String accessToken, Long uid) {
-        List<Transfer> attachmentsEmails = new ArrayList<>();
-
-        try {
-            System.out.println(">>> [1] Creating Gmail client for uid=" + uid);
-            var gmailClient = gmailService.createClient(accessToken);
-
-            Instant last = transferRepository.findLatestTransfersByUid(uid);
-            String query = "has:attachment";
-            if (last != null) {
-                long safeEpoch = last.getEpochSecond() - 86400;
-                query = "has:attachment after:" + safeEpoch;
-            }
-            System.out.println(">>> [2] Query: " + query);
-
-            String pageToken = null;
-
-            do {
-                var request = gmailClient.users().messages().list("me").setQ(query);
-                if (pageToken != null) request.setPageToken(pageToken);
-
-                var response = request.execute();
-
-                System.out.println(">>> [3] Messages in response: " +
-                        (response.getMessages() != null ? response.getMessages().size() : "NULL"));
-
-                if (response.getMessages() != null) {
-                    for (Message msg : response.getMessages()) {
-
-                        System.out.println(">>> [4] Fetching full message: " + msg.getId());
-                        Message fullmessage = gmailClient.users().messages()
-                                .get("me", msg.getId()).execute();
-
-                        String from = null;
-                        Instant instantDate = null;
-
-                        for (MessagePartHeader header : fullmessage.getPayload().getHeaders()) {
-                            if (header.getName().equalsIgnoreCase("from")) from = header.getValue();
-                            if (header.getName().equalsIgnoreCase("date")) {
-                                try {
-                                    String dateValue = header.getValue().replaceAll("\\s\\(.*\\)$", "");
-                                    SimpleDateFormat format = new SimpleDateFormat(
-                                            "EEE, d MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
-                                    instantDate = format.parse(dateValue).toInstant();
-                                } catch (Exception e) {
-                                    instantDate = Instant.ofEpochMilli(fullmessage.getInternalDate());
-                                }
-                            }
-                        }
-
-                        int before = attachmentsEmails.size();
-                        findAttachmentsRecursive(
-                                fullmessage.getPayload().getParts(),
-                                msg.getId(), from, instantDate,
-                                attachmentsEmails, uid
-                        );
-                        int after = attachmentsEmails.size();
-                        System.out.println(">>> [5] Message " + msg.getId() +
-                                " → found " + (after - before) + " attachments");
-                    }
-                }
-
-                pageToken = response.getNextPageToken();
-                System.out.println(">>> [6] Next page token: " + pageToken);
-
-            } while (pageToken != null);
-
-            System.out.println(">>> [7] TOTAL attachments found: " + attachmentsEmails.size());
-            return attachmentsEmails;
-
-        } catch (Exception e) {
-            System.err.println(">>> [ERROR] Gmail fetch failed: " + e.getMessage());
-            e.printStackTrace();
-            throw new RuntimeException("Gmail sync failed", e);
-        }
-    }
-
-    // Keep your existing recursive helper method right below it!
-    private void findAttachmentsRecursive(List<MessagePart> parts, String msgId, String from, Instant date, List<Transfer> list, Long uid) {
-        if (parts == null) return;
-
-        for (MessagePart part : parts) {
-            if (part.getParts() != null) {
-                // Pass uid down the recursive chain
-                findAttachmentsRecursive(part.getParts(), msgId, from, date, list, uid);
-            }
-
-            String filename = part.getFilename();
-            if (filename != null && !filename.isEmpty() && part.getBody().getAttachmentId() != null) {
-                Integer sizeInt = part.getBody().getSize();
-                Long sizeLong = (sizeInt != null) ? sizeInt.longValue() : 0L;
-               if(sizeLong < 20480 && part.getMimeType()!=null && part.getMimeType().startsWith("image/")){
-                   continue;
-               }
-                // BOOM. Real UID injected directly into the row.
-                Transfer t = new Transfer(
-                        uid,
-                        msgId,
-                        part.getBody().getAttachmentId(),
-                        filename,
-                        sizeLong,
-                        part.getMimeType(),
-                        from,
-                        date
-                );
-                list.add(t);
-            }
-        }
-    }
 
     // Recursive Helper Method
 
 //Done
 
+    /// [
+    ///{
+    ///     "id": "fdcba37b-aed8-496f-88bc-4d3a0d3f29e6",
+    ///     "att_id": "ANGjdJ9WeFSIHCkOyt9Rq6GLtMK6FMidTNzMS-CL2bVhdClQJPPnL_A1j_7aGZVM9-68Ninj_8K8M0lHMh4eVgwBwVvMpaCzzUXvnoBFwBwxYLH1B7Jig16sMd7_uUBKMmICQQSFuMtce9q7WMI9AvwzzJaNjG7dR2-EzNagg1_q6xyj9L6bac6WQPvDCbYqd-v_ZZK63kVGxFEDoIfdWnQvG5qku2mCSTE_5MAof4pWsk-VavDld-R1KcnSg-rN2Pw2GmZPctaLWpD-ZP0QMxl4xnq-_vw3AruBgc63q1XCA0rZfhGX0436tY1dH6Bh3-zarSh5izOER9_D9FQ1sxi_mpbu56Ysr1Uj1Qq5jxcPB7aLGOHoM1Z0ZJPHKu70xZhDkWac5o2BtOVWYK_S",
+    ///     "bytes": 258583,
+    ///     "created_at": "2026-04-13 08:36:24.83135+00",
+    ///     "done_at": null,
+    ///     "email_sent_at": "2024-09-08 22:33:38+00",
+    ///     "err": null,
+    ///     "fname": "INS_شهادة المقرر باللغة العربية.pdf",
+    ///     "mime_type": "application/pdf",
+    ///     "msg_id": "191d3c57725811ef",
+    ///     "s3_key": null,
+    ///     "sender_email": "\"لا ترسل رد على هذا البريد الإلكتروني\" <noreply@maharatech.gov.eg>",
+    ///     "status": null,
+    ///     "uid": 12
+    ///   }
+    /// ]
 
+public Map<String, Object>  response (Long uid,int page,int size){
+        Map<String,Object> response = new LinkedHashMap<>();
+        int safesize= Math.min(size,50);
+        Pageable pageable= PageRequest.of(page,safesize);
+        Page<Transfer> transferPage = (Page<Transfer>) transferRepository.findByUidOrderByEmailSentAtDesc(uid, pageable);
+        response.put("content", transferPage.getContent());
+        response.put("page", transferPage.getNumber());
+        response.put("size", transferPage.getSize());
+        response.put("totalElements", transferPage.getTotalElements());
+        response.put("totalPages", transferPage.getTotalPages());
+        response.put("first", transferPage.isFirst());
+        response.put("last", transferPage.isLast());
+        response.put("empty", transferPage.isEmpty());
+
+
+
+    return response;
+}
+
+
+
+    public void syncall(Long uid,String uname , boolean sync ,String provider) throws Exception {
+
+        OAuth2AuthorizedClient googleClinet  = clientService.loadAuthorizedClient("google",uname);
+        if(googleClinet!=null){
+            System.out.println("FETCHING FOR GMAIL");
+            emailFetchingAsyncService.syncMessages(uid,uname,sync,"google");
+        }
+
+        OAuth2AuthorizedClient microsoftClinet  = clientService.loadAuthorizedClient("microsoft",uname);
+        if(microsoftClinet!=null){
+            System.out.println("FETCHING FOR outlook");
+            emailFetchingAsyncService.syncMessages(uid,uname,sync,"microsoft");
+        }
+    }
+
+
+
+    public  List<Transfer> outlookmessagestest() throws Exception {
+        return null;
+    }
 }

@@ -1,5 +1,6 @@
 package com.emailorch.email_fetcher.provider;
 
+import ch.qos.logback.classic.Logger;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -35,7 +36,6 @@ public class R2Provider implements CloudProvider {
         s3.putObject(req, RequestBody.fromInputStream(in, len));
         return key;
     }
-
     @Override
     public String presign(String key) {
         var getReq = GetObjectRequest.builder()

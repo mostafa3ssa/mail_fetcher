@@ -2,17 +2,23 @@ package com.emailorch.email_fetcher.controller;
 
 import com.emailorch.email_fetcher.model.Status;
 import com.emailorch.email_fetcher.model.Transfer;
+import com.emailorch.email_fetcher.model.User;
 import com.emailorch.email_fetcher.provider.CloudProvider;
 import com.emailorch.email_fetcher.repository.TransferRepository;
 import com.emailorch.email_fetcher.repository.UserRepository;
 import com.emailorch.email_fetcher.service.TransferService;
+import jakarta.transaction.Transactional;
+import org.apache.tomcat.Jar;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
 
@@ -24,22 +30,26 @@ public class TransferController {
     private final TransferService svc;
     private final TransferRepository repo;
     private final UserRepository urepo;
-    private final CloudProvider cp;       // ← NEW
+    private final CloudProvider cp;
+    private final OAuth2AuthorizedClientService clientService;
+    private final JdbcTemplate jdbcTemplate;
 
-    public TransferController(TransferService svc, TransferRepository repo,
-                              UserRepository urepo, CloudProvider cp) {
+    public TransferController(TransferService svc, JdbcTemplate jdbcTemplate ,TransferRepository repo,
+                              UserRepository urepo, CloudProvider cp, OAuth2AuthorizedClientService clientService) {
         this.svc = svc;
         this.repo = repo;
         this.urepo = urepo;
         this.cp = cp;                     // ← NEW
+        this.clientService = clientService;
+        this.jdbcTemplate=jdbcTemplate;
     }
 
     // ── POST /api/transfers ─────────────────────────────────────
     @PostMapping
+    @Transactional
     ResponseEntity<?> create(
             @RequestBody TransferReq req,
-            @RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient c,
-            @AuthenticationPrincipal OAuth2User u) {
+            @AuthenticationPrincipal OAuth2User u) throws IOException {
 
         Long uid = resolveUid(u);
 
@@ -50,7 +60,6 @@ public class TransferController {
         }
 
         var opt = repo.findByUidAndMsgIdAndFname(uid, req.msgId, req.fname);
-
         if (opt.isEmpty()) {
             return ResponseEntity.status(404)
                     .body(Map.of("error", "not_found",
@@ -58,7 +67,6 @@ public class TransferController {
         }
 
         Transfer t = opt.get();
-
         if (t.getStatus() != null) {
             if (t.getStatus() == Status.FAILED) {
                 t.setErr(null);
@@ -72,13 +80,18 @@ public class TransferController {
                         .body(Map.of("error", "transfer_already_in_progress"));
             }
         }
-
+        System.out.println("Loading client for: " + t.getProvider().toLowerCase() + " | user: " + u.getName());
+        OAuth2AuthorizedClient c = clientService.loadAuthorizedClient(t.getProvider().toLowerCase(),u.getName());
+        if(c==null){
+            return ResponseEntity.status(400).body(Map.of("error","sorry the client is wrong"));
+        }
         t.setStatus(Status.PENDING);
-        repo.save(t);
-
-        String tok = c.getAccessToken().getTokenValue();
-        svc.exec(t, tok);
-
+        UUID transferId = repo.save(t).getId();
+        String provider = t.getProvider();
+        repo.flush(); // ensure write is committed
+        String tok = "";
+        tok= c.getAccessToken().getTokenValue();
+        svc.exec(transferId, tok, provider); // only primitives cross thread boundary
         return ResponseEntity.accepted()
                 .body(Map.of("id", t.getId(), "status", "PENDING"));
     }
@@ -86,11 +99,18 @@ public class TransferController {
     // ── GET /api/transfers/{id} ─────────────────────────────────
     @GetMapping("/{id}")
     ResponseEntity<?> poll(@PathVariable UUID id) {
-        return repo.findById(id)
-                .<ResponseEntity<?>>map(ResponseEntity::ok)
-                .orElse(ResponseEntity.status(404)
-                        .body(Map.of("error", "not_found",
-                                "message", "Transfer not found")));
+        String sql = "select * from transfers where id = ?";
+        try{
+            Map<String,Object> row = jdbcTemplate.queryForMap(sql,id);
+            return ResponseEntity.ok(row);
+        }
+        catch (Exception e ){
+            return ResponseEntity.status(404)
+                    .body(Map.of("error", "not_found",
+                            "message", "Transfer not found"));
+        }
+
+
     }
 
     // ── GET /api/transfers/{id}/download ────────────────────────  ← NEW
@@ -152,5 +172,6 @@ public class TransferController {
         public String attId;
         public String fname;
         public Long bytes;
+        public String provider;
     }
 }

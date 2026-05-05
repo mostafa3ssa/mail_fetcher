@@ -30,7 +30,7 @@ public class GmailProvider implements EmailProvider {
             // body.getData() = base64url string
             // We decode it as a STREAM, not a full byte[]
             byte[] b64 = body.getData().getBytes(StandardCharsets.US_ASCII);
-            return Base64.getUrlDecoder().wrap(new ByteArrayInputStream(b64));
+            return  Base64.getUrlDecoder().wrap(new ByteArrayInputStream(b64));
 
             // ⚠️ The base64 STRING is in memory (Gmail API limitation)
             // But the DECODED binary bytes are emitted chunk-by-chunk

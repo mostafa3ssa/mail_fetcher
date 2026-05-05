@@ -45,7 +45,7 @@ public class SecurityCfg {
                 .oauth2Login(oauth2 -> oauth2
                         .successHandler(successHandler)      // ← replaces defaultSuccessUrl
                         .authorizedClientService(acs)
-                )
+                ).oauth2Client((oauth2)->oauth2.authorizedClientService(acs))
                 .logout(logout -> logout.logoutSuccessUrl("/"));
 
         return http.build();

@@ -51,13 +51,14 @@ public class Transfer {
 
     @Column(name = "email_sent_at")
     private Instant emailSentAt;
-
+    @Column(name="provider")
+    private String provider;
     // 1. JPA no-args (required)
     public Transfer() {}
 
     // 2. Sync constructor (Gmail discovery — status is NULL)
     public Transfer(Long uid, String msgId, String attId, String fname,
-                    Long bytes, String mimeType, String senderEmail, Instant emailSentAt) {
+                    Long bytes, String mimeType, String senderEmail, Instant emailSentAt,String provider) {
         this.uid = uid;
         this.msgId = msgId;
         this.attId = attId;
@@ -68,6 +69,7 @@ public class Transfer {
         this.emailSentAt = emailSentAt;
         this.status = null;            // ← DISCOVERED, NOT UPLOADED
         this.createdAt = Instant.now();
+        this.provider=provider;
     }
 
     // Getters and Setters (unchanged)
@@ -112,4 +114,12 @@ public class Transfer {
 
     public Instant getEmailSentAt() { return emailSentAt; }
     public void setEmailSentAt(Instant emailSentAt) { this.emailSentAt = emailSentAt; }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = provider;
+    }
 }
